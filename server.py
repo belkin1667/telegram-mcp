@@ -43,7 +43,7 @@ MCP_SERVER_PORT = int(os.getenv("MCP_SERVER_PORT", "8000"))
 MCP_OAUTH_DATA_PATH = os.getenv("MCP_OAUTH_DATA_PATH", "oauth_data.json")
 
 # Import main module — this registers all MCP tools on the `mcp` instance
-from main import mcp, client, _configure_allowed_roots_from_cli  # noqa: E402
+from main import mcp, _configure_allowed_roots_from_cli, _start_all_clients  # noqa: E402
 
 from mcp.server.auth.settings import (  # noqa: E402
     AuthSettings,
@@ -88,16 +88,12 @@ def configure_oauth() -> None:
 
 
 async def _main_http() -> None:
-    """Start Telegram client and run MCP over HTTP with OAuth."""
+    """Start all Telegram clients and run MCP over HTTP with OAuth."""
     try:
-        print("Starting Telegram client...", file=sys.stderr)
-        await client.start()
-
-        print("Warming entity cache...", file=sys.stderr)
-        await client.get_dialogs()
+        await _start_all_clients()
 
         print(
-            f"Telegram client started. Running MCP HTTP server on "
+            f"All clients started. Running MCP HTTP server on "
             f"{MCP_SERVER_HOST}:{MCP_SERVER_PORT}...",
             file=sys.stderr,
         )

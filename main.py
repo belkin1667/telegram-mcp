@@ -89,21 +89,37 @@ def get_entity_filter_type(entity: Any) -> Optional[str]:
 
 load_dotenv()
 
-TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID"))
-TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
-TELEGRAM_SESSION_NAME = os.getenv("TELEGRAM_SESSION_NAME")
-
-# Check if a string session exists in environment, otherwise use file-based session
-SESSION_STRING = os.getenv("TELEGRAM_SESSION_STRING")
+from account_manager import (  # noqa: E402
+    load_accounts_from_env,
+    register_client,
+    set_current_account,
+    get_current_client,
+    get_current_account_name,
+    list_accounts as list_registered_accounts,
+    get_client as get_named_client,
+)
 
 mcp = FastMCP("telegram")
 
-if SESSION_STRING:
-    # Use the string session if available
-    client = TelegramClient(StringSession(SESSION_STRING), TELEGRAM_API_ID, TELEGRAM_API_HASH)
-else:
-    # Use file-based session
-    client = TelegramClient(TELEGRAM_SESSION_NAME, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+
+class _ClientProxy:
+    """Transparent proxy that delegates to the currently active TelegramClient."""
+
+    def __getattr__(self, name):
+        return getattr(get_current_client(), name)
+
+    def __call__(self, *args, **kwargs):
+        return get_current_client()(*args, **kwargs)
+
+
+# Load and register all configured accounts
+_account_clients = load_accounts_from_env()
+for _name, _c in _account_clients.items():
+    register_client(_name, _c)
+set_current_account(next(iter(_account_clients)))
+
+# All existing tools use `client.xxx` — the proxy forwards to the active account
+client = _ClientProxy()
 
 # Setup robust logging with both file and console output
 logger = logging.getLogger("telegram_mcp")
@@ -683,6 +699,62 @@ def _configure_allowed_roots_from_cli(argv: Optional[List[str]] = None) -> None:
 
     global SERVER_ALLOWED_ROOTS
     SERVER_ALLOWED_ROOTS = _dedupe_paths(resolved_roots)
+
+
+# ── Multi-account tools ──────────────────────────────────────────────────
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(title="List Accounts", readOnlyHint=True)
+)
+async def list_accounts() -> str:
+    """List all configured Telegram accounts and show which one is active."""
+    names = list_registered_accounts()
+    current = get_current_account_name()
+    if len(names) == 1 and names[0] == "default":
+        me = await get_current_client().get_me()
+        display = me.first_name or me.username or str(me.id)
+        return json.dumps({"accounts": [{"name": "default", "display": display, "active": True}]})
+    results = []
+    for name in names:
+        c = get_named_client(name)
+        me = await c.get_me()
+        display = me.first_name or me.username or str(me.id)
+        results.append({"name": name, "display": display, "active": name == current})
+    return json.dumps({"accounts": results}, indent=2)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(title="Switch Account")
+)
+async def switch_account(account: str) -> str:
+    """Switch the active Telegram account. All subsequent tool calls will use this account.
+    Args:
+        account: Name of the account to switch to (as configured in TELEGRAM_ACCOUNTS).
+    """
+    names = list_registered_accounts()
+    if account not in names:
+        return json.dumps(
+            {"error": f"Unknown account '{account}'", "available": names}
+        )
+    set_current_account(account)
+    me = await get_current_client().get_me()
+    display = me.first_name or me.username or str(me.id)
+    return json.dumps({"switched_to": account, "display": display})
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(title="Get Active Account", readOnlyHint=True)
+)
+async def get_active_account() -> str:
+    """Show which Telegram account is currently active."""
+    name = get_current_account_name()
+    me = await get_current_client().get_me()
+    display = me.first_name or me.username or str(me.id)
+    return json.dumps({"account": name, "display": display})
+
+
+# ── Telegram tools ───────────────────────────────────────────────────────
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Get Chats", openWorldHint=True, readOnlyHint=True))
@@ -4713,19 +4785,22 @@ async def reorder_folders(folder_ids: List[int]) -> str:
         )
 
 
-async def _main() -> None:
-    try:
-        # Start the Telethon client non-interactively
-        print("Starting Telegram client...", file=sys.stderr)
-        await client.start()
-
+async def _start_all_clients() -> None:
+    """Start all registered Telegram clients and warm their caches."""
+    for name in list_registered_accounts():
+        c = get_named_client(name)
+        print(f"Starting Telegram client '{name}'...", file=sys.stderr)
+        await c.start()
         # Warm entity cache — StringSession has no persistent cache,
         # so fetch all dialogs once to populate it
-        print("Warming entity cache...")
-        await client.get_dialogs()
+        print(f"Warming entity cache for '{name}'...", file=sys.stderr)
+        await c.get_dialogs()
 
-        print("Telegram client started. Running MCP server...")
-        # Use the asynchronous entrypoint instead of mcp.run()
+
+async def _main() -> None:
+    try:
+        await _start_all_clients()
+        print("All clients started. Running MCP server...", file=sys.stderr)
         await mcp.run_stdio_async()
     except Exception as e:
         print(f"Error starting client: {e}", file=sys.stderr)

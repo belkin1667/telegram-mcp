@@ -39,7 +39,7 @@ dependencies = [
 "Bug Tracker" = "https://github.com/chigwell/telegram-mcp/issues"
 
 [tool.setuptools]
-py-modules = ["main", "server", "oauth_provider", "session_string_generator"]
+py-modules = ["main", "server", "oauth_provider", "account_manager", "session_string_generator"]
 
 [project.scripts]
 telegram-mcp = "main:main"
