@@ -31,6 +31,7 @@ dependencies = [
     "python-json-logger>=3.3.0",
     "qrcode>=8.2",
     "telethon>=1.42.0",
+    "uvicorn>=0.32.0",
 ]
 
 [project.urls]
@@ -38,10 +39,11 @@ dependencies = [
 "Bug Tracker" = "https://github.com/chigwell/telegram-mcp/issues"
 
 [tool.setuptools]
-py-modules = ["main", "session_string_generator"]
+py-modules = ["main", "server", "oauth_provider", "session_string_generator"]
 
 [project.scripts]
 telegram-mcp = "main:main"
+telegram-mcp-server = "server:main"
 telegram-mcp-generate-session = "session_string_generator:main"
 
 [tool.black]

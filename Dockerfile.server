@@ -1,0 +1,38 @@
+# Dockerfile for running Telegram MCP as an HTTP server with OAuth
+FROM python:3.13-alpine
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir uvicorn
+
+# Copy application code
+COPY main.py server.py oauth_provider.py ./
+
+# Create non-root user with a writable data directory
+RUN adduser --disabled-password --gecos "" appuser && \
+    mkdir -p /app/data && \
+    chown -R appuser:appuser /app
+USER appuser
+
+# Telegram credentials (provide at runtime)
+ENV TELEGRAM_API_ID=""
+ENV TELEGRAM_API_HASH=""
+ENV TELEGRAM_SESSION_NAME="telegram_mcp_session"
+ENV TELEGRAM_SESSION_STRING=""
+
+# Server configuration
+ENV MCP_SERVER_URL=""
+ENV MCP_SERVER_HOST="0.0.0.0"
+ENV MCP_SERVER_PORT="8000"
+ENV MCP_OAUTH_DATA_PATH="/app/data/oauth_data.json"
+
+EXPOSE 8000
+
+CMD ["python", "server.py"]
